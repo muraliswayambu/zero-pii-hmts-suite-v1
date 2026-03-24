@@ -428,6 +428,8 @@
     }
   }
   window.addEventListener('beforeunload', () => { void collapseSession({ clearDom: false }); });
+  window.addEventListener('pagehide', () => { void collapseSession({ clearDom: false }); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void collapseSession({ clearDom: false }); });
   function logEvent(e) {
     const nasa = state.nasaByTest[e.test_name]||null;
     const entry = {
@@ -1392,12 +1394,12 @@
     a.href=url;
     a.download=filename;
     document.body.appendChild(a);
+    await collapseSession();
     a.click();
-    setTimeout(async ()=>{
+    setTimeout(()=>{
       URL.revokeObjectURL(url);
       a.remove();
-      await collapseSession();
-    }, 1200);
+    }, 1000);
   }
 
   function summarizeTest(tn){
@@ -1438,7 +1440,7 @@
     setProgress(0);setStatus('HMTS Suite');
     const subtleReady = !!(window.crypto && window.crypto.subtle);
     const cryptoWarning = subtleReady
-      ? '<p class="smallnote" style="color:#4cd28d;">✓ Secure Context detected. Hardware-accelerated Zero-PII active.</p>'
+      ? '<p class="smallnote" style="color:#4cd28d;">✓ Secure Context detected. Hardware-accelerated Zero-PII active. Strict lifecycle destruction remains enabled.</p>'
       : `<div style="margin:12px 0 0;padding:14px 16px;border:1px solid #c5862b;border-radius:12px;background:rgba(197, 134, 43, 0.15)">
           <p style="margin:0 0 8px;font-weight:800;color:#ffd166">⚠ Offline Poly-Cipher Mode Engaged</p>
           <p style="margin:0;color:#e7edf5;font-size:14px;">The browser restricted hardware cryptography. The suite has automatically switched to a software cipher to preserve the architecture.</p>
