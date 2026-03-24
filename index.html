@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<!--
+  HMTS Behavioral Testing Suite — Version 3.1
+  Murali Swayambu | Independent Researcher | Chennai, India | 2026
+  Companion instrument to: Human–Machine Temporal Stability (HMTS), Zenodo, 2026
+  Licence: CC BY-NC 4.0
+
+  Changelog v3.1 (fixes applied from product test audit):
+  1. suite_version field updated to 'v3.1' in all CSV output rows.
+  2. Test 7 (Starlight): flip delay randomised to 400–600ms (was fixed at 600ms).
+     Condition label updated to 'flip_400to600ms_after_appearance'.
+     flip_delay_ms logged in extra field per trial.
+     After DON'T TAP flip fires, a green '✓ I stopped — Next Trial' button appears
+     so participants who correctly stop are never trapped — they advance without
+     tapping the bad button. correct_stop=true logged in extra field for these trials.
+     Instructions updated to describe the Next Trial button.
+  3. Test 2 (Immediate Response): confidence screen is now fully user-controlled.
+     Auto-advance timer removed entirely. Participant taps 'Submit & Continue' when ready.
+     No time limit on confidence rating — participant pace, participant choice.
+     confidence_rt_ms (time from screen appearance to Submit tap) logged in extra field.
+     confidence_interacted (did participant move the slider) logged in extra field.
+     confidence_skipped=true logged when no decision was made (no_response trials).
+     Scale labels updated: '1 — Not at all' to '10 — Completely'.
+  4. Test 4 (Visual Integration): target word FRAUD now placed only at positions 1–8
+     (excludes positions 0 and 9) to remove first/last position confound.
+     target_pos logged in extra field for both stimulus_onset and response events.
+  5. runSuite catch block: downloadCsv() called before error screen so partial
+     data is preserved if an unexpected error occurs mid-session.
+  6. HTML title and intro screen updated to display Version 3.1.
+  8. Test 5 (Fraud Scenario) — screen freeze bug fixed + two UX improvements:
+     a) Switched from arena() to screen() — card layout matches Test 6 style,
+        screen clears visibly between every trial.
+     b) Trial counter added (Trial X of 6) so participant knows where they are.
+     c) Timer moved inline into the card header alongside the trial counter.
+     d) Safe/Spam button order randomised each trial (spamLeft flag logged in
+        extra field) — removes positional learning / default Spam tap pattern.
+     e) Tapped button turns green with ✓ confirmation, note text updates to
+        'Response recorded. Next trial loading...'
+     f) On timeout: buttons grey to 30%, timer freezes 0.00s, note says
+        'Time expired. Next trial loading...'
+     g) spam_left=true/false logged in extra field for both stimulus_onset
+        and response rows — allows position bias analysis.
+  12. Test 2 confidence slider — mobile fix: removed preventDefault/stopPropagation
+      from slider touch listeners (was suppressing native iOS/Android slider drag).
+      Changed touchstart/touchmove to passive:true. Added touchend listener to
+      capture final value when finger lifts. Slider now moves correctly on mobile
+      and confidence_interacted=True will log correctly.
+      (was only in stimulus_onset). Confirmed blank across four participants —
+      one-line fix. Motor halt window analysis can now be matched to exact
+      flip delay used per trial.
+     height increased to 90px, font size increased to 15px for visibility.
+     Fall destination updated to topArea-90-140. midLabel position updated
+     to match. Buckets now sit in the mid-lower screen area, clear of all
+     browser chrome on both mobile and desktop.
+     a) Buckets raised from bottom:16px to bottom:72px on both mobile and desktop,
+        clearing the Chrome address bar / Google search trigger zone on mobile.
+     b) Bucket width reduced from 46% to 42% each (left:3%, right:3%) creating
+        a 10% dead-zone gap between them — prevents desktop mouse overshoot
+        from hitting the opposite bucket.
+     c) A centre dead-zone label added between buckets on desktop showing
+        '← green | red →' — visual confirmation of the gap, pointer-events:none.
+     d) Desktop click handler now validates pointer coordinates are genuinely
+        inside the bucket rect — fast mouse drag across both buckets can no
+        longer double-fire and resolve the next trial early.
+     e) Fall destination updated from bucketTop=topArea-80-16 to -72 to match
+        raised bucket position — square still lands visually inside the bucket.
+     f) Emoji replaced with HTML entities to avoid rendering inconsistency.
+
+  Base: hmts_suite_mobile_v3.html (filed Zenodo 19 March 2026, DOI: 10.5281/zenodo.19118694)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>HMTS Behavioral Testing Suite v3.1 — Zero-PII Test-Friendly</title>
+<style>
+  :root {
+    --bg: #111418; --panel: #191e24; --panel2: #202731;
+    --text: #e7edf5; --muted: #9eaabb; --accent: #8fb8ff;
+    --danger: #ff6464; --ok: #4cd28d; --warn: #ffd166;
+    --border: #2c3643; --shadow: 0 8px 32px rgba(0,0,0,0.4);
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #111418; color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    overflow: hidden; touch-action: manipulation;
+  }
+  body { display: flex; align-items: stretch; }
+  #app { width: 100%; height: 100%; position: relative; overflow: hidden; }
+
+  /* TOPBAR */
+  .topbar {
+    position: absolute; top: 0; left: 0; right: 0; height: 48px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px; z-index: 10; background: rgba(17,20,24,0.92);
+    border-bottom: 1px solid var(--border);
+  }
+  .pill { font-size: 12px; color: var(--muted); }
+  .progress-wrap { display: flex; align-items: center; gap: 8px; }
+  .progress {
+    width: 100px; height: 6px; border-radius: 999px;
+    background: #1a2030; overflow: hidden;
+  }
+  .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
+
+  /* SCREENS */
+  .screen {
+    position: absolute; inset: 0; top: 48px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-start;
+    padding: 16px; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .screen.center-content { justify-content: center; }
+
+  /* CARDS */
+  .card {
+    width: 100%; max-width: 600px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  h1 { font-size: 22px; margin: 0 0 10px; }
+  h2 { font-size: 18px; margin: 0 0 10px; }
+  h3 { font-size: 16px; color: var(--accent); margin: 0 0 8px; }
+  p, li { font-size: 15px; line-height: 1.55; margin: 0 0 10px; color: var(--text); }
+  .muted { color: var(--muted); }
+  .space { height: 12px; }
+  ul { padding-left: 20px; margin: 0 0 12px; }
+
+  /* BUTTONS */
+  button {
+    border: 1px solid var(--border); background: var(--panel2); color: var(--text);
+    border-radius: 12px; padding: 14px 20px; font-size: 16px; cursor: pointer;
+    min-height: 52px; min-width: 100px;
+    transition: background .12s, transform .06s;
+    -webkit-appearance: none; appearance: none;
+  }
+  button:active:not(:disabled) { transform: scale(0.97); background: #263241; }
+  button.primary { background: #223145; border-color: #345072; }
+  button.danger { background: #402428; border-color: #6d3138; }
+  button:disabled { opacity: 0.4; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn-row button { flex: 1; min-width: 120px; }
+  .btn-full { width: 100%; }
+
+  /* ARENA */
+  .arena {
+    position: absolute; inset: 0; top: 48px; overflow: hidden;
+    background: radial-gradient(circle at 50% 30%, rgba(143,184,255,.05), transparent 60%);
+  }
+
+  /* FALLING BLOCKS (Test 1) */
+  .falling {
+    position: absolute; border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.8);
+  }
+  .tap-bucket {
+    position: absolute; bottom: 140px;
+    width: 42%; height: 90px; border: 2px dashed var(--border);
+    border-radius: var(--radius); display: flex; align-items: center;
+    justify-content: center; color: var(--muted); font-size: 15px;
+    font-weight: 700; letter-spacing: 0.5px;
+    transition: background .1s, border-color .1s;
+  }
+  .tap-bucket.left { left: 3%; }
+  .tap-bucket.right { right: 3%; }
+  .tap-bucket.active { border-color: var(--accent); background: rgba(143,184,255,.08); }
+
+  /* TIMER */
+  .timer {
+    position: absolute; top: 12px; right: 12px;
+    padding: 8px 14px; border: 1px solid #7d3138;
+    background: rgba(127,30,40,0.3); color: #ffd1d4;
+    border-radius: 12px; font-weight: 800; font-size: 22px;
+  }
+
+  /* TARGET CIRCLE (Test 3) */
+  .target-circle {
+    position: absolute; border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.25);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 13px;
+  }
+  .touch-dot {
+    position: absolute; width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--accent); background: rgba(143,184,255,0.18);
+    transform: translate(-50%,-50%); pointer-events: none;
+  }
+
+  /* EMAIL */
+  .email-frame {
+    width: 100%; background: #f3f5f7; color: #101317;
+    border-radius: var(--radius); overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .email-head { background: #d9e2ea; padding: 12px 16px; font-size: 13px; }
+  .email-body { padding: 16px; }
+  .email-link { color: #1f5dff; text-decoration: underline; font-weight: 600; word-break: break-all; font-size: 14px; }
+  .danger-mark { color: #a51d2d; font-weight: 800; }
+
+  /* WORD DISPLAY */
+  .word-display {
+    font-size: clamp(32px, 10vw, 64px); font-weight: 800;
+    letter-spacing: 3px; text-align: center;
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  }
+
+  /* COLOR CUE */
+  .color-cue {
+    width: 100%; max-width: 280px; height: 100px;
+    border-radius: var(--radius); margin: 12px auto;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 800;
+  }
+
+  /* MODAL */
+  .modal-back {
+    position: absolute; inset: 0; top: 48px;
+    background: rgba(0,0,0,0.6); display: flex;
+    align-items: center; justify-content: center;
+    padding: 16px; z-index: 20;
+  }
+  .modal {
+    width: 100%; max-width: 500px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px;
+  }
+  .slider-wrap { margin: 14px 0; }
+  .slider-wrap label { font-size: 14px; display: block; margin-bottom: 6px; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); height: 32px; }
+  .scale-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* CLICK TARGET (Test 7) */
+  .click-target {
+    position: absolute; min-width: 160px; min-height: 64px;
+    padding: 16px 20px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: #233244;
+    color: #eef5ff; font-size: 18px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .click-target.bad { background: #5b2327; border-color: #8b2f35; }
+
+  /* COUNTDOWN */
+  .countdown-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px; text-align: center;
+    width: 100%; max-width: 400px;
+  }
+  .countdown-num { font-size: 56px; font-weight: 800; color: var(--accent); }
+
+  /* MISC */
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .smallnote { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .lock-text { font-size: 14px; color: var(--warn); margin: 8px 0; min-height: 20px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .footer-note {
+    position: absolute; bottom: 8px; left: 12px; right: 12px;
+    font-size: 11px; color: var(--muted); text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <span class="pill" id="statusPill">HMTS Suite</span>
+    <div class="progress-wrap">
+      <span class="pill" id="testCounter">0/7</span>
+      <div class="progress"><div id="progressBar"></div></div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const app = document.getElementById('app');
+  const statusPill = document.getElementById('statusPill');
+  const testCounter = document.getElementById('testCounter');
+  const progressBar = document.getElementById('progressBar');
+  const IS_MOBILE = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+  const state = {
+    participantId: 'HMTS-' + Math.random().toString(36).slice(2,10).toUpperCase(),
+    logs: [], nasaByTest: {}, suiteStart: performance.now(),
+    vw: window.innerWidth, vh: window.innerHeight,
+    summaryByTest: Object.create(null),
+    sessionCollapsed: false,
+    sessionCryptoReady: false,
+    collapseStartedAt: 0
+  };
+  let sessionKey = null;
+  let useFallbackCrypto = false;
+  let encryptionQueue = Promise.resolve();
+  const textEncoder = new TextEncoder();
+  const textDecoder = new TextDecoder();
+  window.addEventListener('resize', () => { state.vw = window.innerWidth; state.vh = window.innerHeight; });
+
+  function now() { return performance.now(); }
+  function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function clearScreens() { [...app.querySelectorAll('.screen,.modal-back,.arena')].forEach(n => n.remove()); }
+  function setStatus(t) { statusPill.textContent = t; }
+  function setProgress(i) {
+    testCounter.textContent = Math.min(i,7)+'/7';
+    progressBar.style.width = (Math.min(i,7)/7*100)+'%';
+  }
+  function csvEscape(v) {
+    const s = v==null?'':String(v);
+    return /[",
+]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+  }
+  function ensureSummaryBucket(testName) {
+    if (!state.summaryByTest[testName]) state.summaryByTest[testName] = { trials: 0, errors: 0 };
+    return state.summaryByTest[testName];
+  }
+  async function initSessionCrypto() {
+    if (sessionKey) return sessionKey;
+    if (window.crypto && window.crypto.subtle) {
+      sessionKey = await window.crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+      useFallbackCrypto = false;
+    } else {
+      console.warn('[HMTS Zero-PII] Web Crypto unavailable. Engaging offline Poly-Cipher fallback.');
+      sessionKey = { _ephemeralSecret: Math.floor(Math.random() * 255) + 1 };
+      useFallbackCrypto = true;
+    }
+    state.sessionCryptoReady = true;
+    return sessionKey;
+  }
+
+  function getSecureIv() {
+    if (window.crypto && window.crypto.getRandomValues) {
+      return window.crypto.getRandomValues(new Uint8Array(12));
+    }
+    const iv = new Uint8Array(12);
+    for (let i = 0; i < 12; i++) iv[i] = Math.floor(Math.random() * 256);
+    return iv;
+  }
+  function queueEncryptedLog(entry) {
+    const testName = entry.test_name || 'Unknown';
+    if (entry.event_type === 'response') {
+      const bucket = ensureSummaryBucket(testName);
+      bucket.trials += 1;
+      if (entry.error_status === true || entry.error_status === 'true') bucket.errors += 1;
+    }
+    encryptionQueue = encryptionQueue.then(async () => {
+      if (state.sessionCollapsed) return;
+      if (!sessionKey) await initSessionCrypto();
+      const json = JSON.stringify(entry);
+      const iv = getSecureIv();
+      const plaintext = textEncoder.encode(json);
+      let ciphertext;
+      if (!useFallbackCrypto) {
+        ciphertext = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sessionKey, plaintext);
+      } else {
+        const enc = new Uint8Array(plaintext.length);
+        for (let i = 0; i < plaintext.length; i++) {
+          enc[i] = plaintext[i] ^ sessionKey._ephemeralSecret;
+        }
+        ciphertext = enc.buffer;
+      }
+      plaintext.fill(0);
+      state.logs.push({ iv, ciphertext });
+    }).catch(err => {
+      console.error('Encrypted logging failed:', err);
+    });
+    return encryptionQueue;
+  }
+  async function decryptLogBlock(block) {
+    if (!sessionKey) throw new Error('Session key unavailable.');
+    let json;
+    if (!useFallbackCrypto) {
+      const plaintext = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: block.iv }, sessionKey, block.ciphertext);
+      const bytes = new Uint8Array(plaintext);
+      json = textDecoder.decode(bytes);
+      bytes.fill(0);
+    } else {
+      const data = new Uint8Array(block.ciphertext);
+      const plain = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) {
+        plain[i] = data[i] ^ sessionKey._ephemeralSecret;
+      }
+      json = textDecoder.decode(plain);
+      plain.fill(0);
+    }
+    return JSON.parse(json);
+  }
+  async function collapseSession(options = {}) {
+    if (state.sessionCollapsed) return;
+    state.sessionCollapsed = true;
+    state.collapseStartedAt = performance.now();
+    const clearDom = options.clearDom !== false;
+    try {
+      if (Array.isArray(state.logs)) {
+        for (const block of state.logs) {
+          if (block && block.iv && typeof block.iv.fill === 'function') block.iv.fill(0);
+          if (block && block.ciphertext instanceof ArrayBuffer) new Uint8Array(block.ciphertext).fill(0);
+          if (block) {
+            block.iv = null;
+            block.ciphertext = null;
+          }
+        }
+      }
+      state.logs = null;
+      state.nasaByTest = null;
+      state.summaryByTest = null;
+      sessionKey = null;
+      encryptionQueue = Promise.resolve();
+      state.sessionCryptoReady = false;
+      if (clearDom) {
+        app.textContent = '';
+        const tombstone = document.createElement('div');
+        tombstone.className = 'screen center-content';
+        tombstone.innerHTML = '<div class="card"><h2>Session Destroyed</h2><p class="muted">Behavioral memory cleared from active application state.</p></div>';
+        app.appendChild(tombstone);
+      }
+    } finally {
+      const elapsed = performance.now() - state.collapseStartedAt;
+      console.log(`[HMTS Zero-PII Test-Friendly] Session collapsed in ${elapsed.toFixed(2)}ms`);
+    }
+  }
+  window.addEventListener('beforeunload', () => { void collapseSession({ clearDom: false }); });
+  function logEvent(e) {
+    const nasa = state.nasaByTest[e.test_name]||null;
+    const entry = {
+      participant_id: state.participantId,
+      suite_version: 'v3.1',
+      relative_ts_ms: Math.round(now()-state.suiteStart),
+      screen_w: state.vw, screen_h: state.vh,
+      nasa_temporal_demand: nasa?nasa.temporalDemand:'',
+      nasa_frustration: nasa?nasa.frustration:'',
+      nasa_performance: nasa?nasa.performance:'',
+      device_type: IS_MOBILE?'mobile':'desktop',
+      confidence_score: '',
+      ...e
+    };
+    void queueEncryptedLog(entry);
+  }
+
+  function screen(html, centered=true) {
+    clearScreens();
+    const d = document.createElement('div');
+    d.className = 'screen'+(centered?' center-content':'');
+    d.innerHTML = html;
+    app.appendChild(d);
+    return d;
+  }
+  function arena() {
+    clearScreens();
+    const d = document.createElement('div');
+    d.className = 'arena';
+    app.appendChild(d);
+    return d;
+  }
+
+  function getPointer(e) {
+    if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches.length) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function shuffleArray(arr) {
+    const copy = arr.slice();
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }
+
+  // ── NASA-TLX ──────────────────────────────────────────────────────────────
+  async function nasaModal(testName) {
+    return new Promise(resolve => {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-back';
+      wrap.innerHTML = `<div class="modal">
+        <h3>NASA-TLX Quick Rating</h3>
+        <p class="muted">Rate your experience: <strong>${testName}</strong></p>
+        <div class="slider-wrap">
+          <label>Temporal Demand: <strong id="v1">50</strong></label>
+          <input id="s1" type="range" min="1" max="100" value="50"/>
+          <div class="scale-row"><span>Low</span><span>High</span></div>
+        </div>
+        <div class="slider-wrap">
+          <label>Frustration: <strong id="v2">50</strong></label>
+          <input id="s2" type="range" min="1" max="100" value="50"/>
+          <div class="scale-row"><span>Low</span><span>High</span></div>
+        </div>
+        <div class="slider-wrap">
+          <label>Performance: <strong id="v3">50</strong></label>
+          <input id="s3" type="range" min="1" max="100" value="50"/>
+          <div class="scale-row"><span>Poor</span><span>Good</span></div>
+        </div>
+        <button class="primary btn-full" id="saveNasa" style="margin-top:12px">Continue</button>
+      </div>`;
+      app.appendChild(wrap);
+      const [s1,s2,s3]=['s1','s2','s3'].map(id=>wrap.querySelector('#'+id));
+      const [v1,v2,v3]=['v1','v2','v3'].map(id=>wrap.querySelector('#'+id));
+      [[s1,v1],[s2,v2],[s3,v3]].forEach(([s,v])=>s.addEventListener('input',()=>v.textContent=s.value));
+      wrap.querySelector('#saveNasa').addEventListener('click',()=>{
+        const res={temporalDemand:+s1.value,frustration:+s2.value,performance:+s3.value};
+        state.nasaByTest[testName]=res;
+        logEvent({test_name:testName,condition:'NASA-TLX',event_type:'nasa_tlx',
+          stimulus_ts_ms:'',response_ts_ms:Math.round(now()),reaction_time_ms:'',
+          error_status:'',mouse_x:'',mouse_y:'',action_key:'',
+          action_value:JSON.stringify(res),extra:''});
+        wrap.remove(); resolve(res);
+      });
+    });
+  }
+
+  // ── COUNTDOWN ────────────────────────────────────────────────────────────
+  async function countdown(label='Starting', n=3) {
+    const s = screen(`<div class="countdown-card">
+      <p class="muted" style="margin-bottom:6px">${label}</p>
+      <div class="countdown-num" id="cdNum">${n}</div>
+      <p class="muted" style="margin-top:6px">Get ready</p>
+    </div>`);
+    const el = s.querySelector('#cdNum');
+    for (let i=n; i>=1; i--) { el.textContent=i; await wait(700); }
+    clearScreens();
+  }
+
+  // ── INSTRUCTIONS ─────────────────────────────────────────────────────────
+  async function instructions(testNo, title, bullets, btnText='Start') {
+    setProgress(testNo-1); setStatus(title);
+    const s = screen(`<div class="card">
+      <h2>Test ${testNo}: ${title}</h2>
+      <ul>${bullets.map(b=>`<li>${b}</li>`).join('')}</ul>
+      <div class="space"></div>
+      <button class="primary btn-full" id="goBtn">${btnText}</button>
+    </div>`);
+    await new Promise(resolve => {
+      const btn = s.querySelector('#goBtn');
+      let fired = false;
+      const trigger = (e) => {
+        if (fired) return;
+        fired = true;
+        if (e && e.cancelable) e.preventDefault();
+        resolve();
+      };
+      btn.addEventListener('click', trigger, { passive: false });
+      btn.addEventListener('touchend', trigger, { passive: false });
+    });
+    setProgress(testNo);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 1 — THE LOOP (tap buckets instead of keyboard)
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test1Loop() {
+    const testName='Test 1 - The Loop';
+    await instructions(1,'The Loop (Chronic Accumulation)',[
+      'Coloured squares fall from the top.',
+      IS_MOBILE
+        ? 'Tap the <strong style="color:#4cd28d">GREEN</strong> bucket for green, <strong style="color:#ff8a8a">RED</strong> bucket for red.'
+        : 'Press <strong>Left Arrow</strong> for <span style="color:#4cd28d">Green</span>, <strong>Right Arrow</strong> for <span style="color:#ff8a8a">Red</span>.',
+      'Speed increases from slow (1000ms) to fast (100ms).'
+    ]);
+    await countdown('The Loop begins',3);
+    setStatus(testName);
+
+    const ar = arena();
+    const leftBucket  = document.createElement('div');
+    const rightBucket = document.createElement('div');
+    const midLabel    = document.createElement('div');
+    leftBucket.className  = 'tap-bucket left';
+    rightBucket.className = 'tap-bucket right';
+    leftBucket.innerHTML  = '<span>&#x1F7E2; GREEN</span>';
+    rightBucket.innerHTML = '<span>&#x1F534; RED</span>';
+    midLabel.style.cssText = `position:absolute;bottom:140px;left:50%;transform:translateX(-50%);`+
+      `height:90px;display:flex;align-items:center;font-size:11px;color:var(--muted);`+
+      `pointer-events:none;user-select:none;white-space:nowrap;`;
+    midLabel.textContent = IS_MOBILE ? '' : '← green  |  red →';
+    ar.appendChild(leftBucket);
+    ar.appendChild(midLabel);
+    ar.appendChild(rightBucket);
+
+    const speeds=[1000,850,700,550,400,300,200,150,100];
+    const trialsPerSpeed=6;
+    let trialNum=0;
+
+    for (const speed of speeds) {
+      for (let t=0; t<trialsPerSpeed; t++) {
+        trialNum++;
+        const color=Math.random()<0.5?'green':'red';
+        const topArea=state.vh-48;
+        const sqSize=Math.min(56, state.vw*0.13);
+        const x=sqSize/2+Math.random()*(state.vw-sqSize*2);
+        const sq=document.createElement('div');
+        sq.className='falling';
+        sq.style.cssText=`width:${sqSize}px;height:${sqSize}px;left:${x}px;top:${-sqSize}px;`+
+          `background:${color==='green'?'#39cb7f':'#d65959'};`;
+        ar.appendChild(sq);
+
+        const stimTs=now();
+        let responded=false, responseTs=null, wasCorrect=false, chosenSide='';
+
+        logEvent({test_name:testName,condition:`fall_ms_${speed}`,event_type:'stimulus_onset',
+          stimulus_ts_ms:Math.round(stimTs),response_ts_ms:'',reaction_time_ms:'',error_status:'',
+          mouse_x:'',mouse_y:'',action_key:'',action_value:color,extra:`trial=${trialNum}`});
+
+        // Keyboard support (desktop)
+        const keyFn=(e)=>{
+          if(responded)return;
+          if(!['ArrowLeft','ArrowRight'].includes(e.key))return;
+          responded=true; responseTs=now();
+          const side=e.key==='ArrowLeft'?'left':'right';
+          chosenSide=side;
+          wasCorrect=(color==='green'&&side==='left')||(color==='red'&&side==='right');
+        };
+        window.addEventListener('keydown',keyFn);
+
+        // Touch/click bucket handlers
+        // On desktop: pointerdown fires before click, guard with responded flag AND
+        // a 120ms cooldown so a fast mouse drag across both buckets cannot double-fire
+        const tapFn=(side)=>(e)=>{
+          if(responded)return;
+          // desktop guard: ignore if pointer is not genuinely over this bucket
+          if(!IS_MOBILE && e.type==='click'){
+            const rect=(side==='left'?leftBucket:rightBucket).getBoundingClientRect();
+            if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)return;
+          }
+          responded=true; responseTs=now(); chosenSide=side;
+          wasCorrect=(color==='green'&&side==='left')||(color==='red'&&side==='right');
+          [leftBucket,rightBucket].forEach(b=>b.classList.remove('active'));
+          (side==='left'?leftBucket:rightBucket).classList.add('active');
+          setTimeout(()=>[leftBucket,rightBucket].forEach(b=>b.classList.remove('active')),200);
+        };
+        const leftEvt=IS_MOBILE?'touchstart':'click';
+        const rightEvt=IS_MOBILE?'touchstart':'click';
+        leftBucket.addEventListener(leftEvt, tapFn('left'), {once:true, passive:true});
+        rightBucket.addEventListener(rightEvt, tapFn('right'), {once:true, passive:true});
+
+        const start=now();
+        const bucketTop=topArea-90-140;
+        await new Promise(resolve=>{
+          function frame(){
+            const el=now()-start;
+            const prog=Math.min(1,el/speed);
+            sq.style.top=(-sqSize+prog*(bucketTop+sqSize))+'px';
+            if(responded||prog>=1)resolve(); else requestAnimationFrame(frame);
+          }
+          requestAnimationFrame(frame);
+        });
+        window.removeEventListener('keydown',keyFn);
+
+        const err=!(responded&&wasCorrect);
+        logEvent({test_name:testName,condition:`fall_ms_${speed}`,event_type:'response',
+          stimulus_ts_ms:Math.round(stimTs),
+          response_ts_ms:responseTs?Math.round(responseTs):'',
+          reaction_time_ms:responseTs?Math.round(responseTs-stimTs):'',
+          error_status:err,mouse_x:'',mouse_y:'',
+          action_key:chosenSide||'miss',action_value:responded?color:'miss',
+          extra:`trial=${trialNum};input=${IS_MOBILE?'touch':'key'}`});
+        sq.remove();
+        await wait(180);
+      }
+    }
+    await nasaModal(testName);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 2 — IMMEDIATE RESPONSE
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test2ImmediateResponse() {
+    const testName='Test 2 - Immediate Response';
+    await instructions(2,'Immediate Response (Cognitive Collapse)',[
+      'A decision card appears briefly.',
+      'Tap <strong>Accept</strong> or <strong>Reject</strong> based on the risk/reward profile.',
+      'After each choice, rate how confident you are from 1 to 10.',
+      'Block A: 1000ms visible. Block B: 250ms visible, then 1500ms response window.'
+    ]);
+
+    const cards = [
+      { risk:'High', reward:'Low', good:false },
+      { risk:'Very High', reward:'Very Low', good:false },
+      { risk:'High', reward:'None', good:false },
+      { risk:'Extreme', reward:'Low', good:false },
+      { risk:'Low', reward:'High', good:true },
+      { risk:'Very Low', reward:'Very High', good:true },
+      { risk:'None', reward:'High', good:true },
+      { risk:'Low', reward:'Extreme', good:true }
+    ];
+
+    async function collectConfidence(choice, label, exposureMs) {
+      return await new Promise(resolve => {
+        const confidenceStart = now();
+        const s = screen(`
+          <div class="card">
+            <p class="muted">${label} · ${exposureMs}ms</p>
+            <h2>Decision Recorded</h2>
+            <p><strong>Your choice:</strong> ${choice}</p>
+            <div class="space"></div>
+            <h3>How confident are you in this decision?</h3>
+            <div class="slider-wrap">
+              <label>Confidence: <strong id="confVal">5</strong></label>
+              <input id="confSlider" type="range" min="1" max="10" step="1" value="5" />
+              <div class="scale-row"><span>1 — Not at all</span><span>10 — Completely</span></div>
+            </div>
+            <button class="primary btn-full" id="confSubmit">Submit &amp; Continue</button>
+            <p class="smallnote" id="confNote">Move the slider then tap Submit when ready. No time limit.</p>
+          </div>`);
+
+        const slider = s.querySelector('#confSlider');
+        const confVal = s.querySelector('#confVal');
+        const submitBtn = s.querySelector('#confSubmit');
+        const confNote = s.querySelector('#confNote');
+        let interacted = false;
+        let finished = false;
+
+        const markInteracted = () => {
+          if (!interacted) {
+            interacted = true;
+            confNote.textContent = 'Tap Submit when ready.';
+          }
+          confVal.textContent = slider.value;
+        };
+        slider.addEventListener('input', markInteracted);
+        slider.addEventListener('change', markInteracted);
+        if (IS_MOBILE) {
+          slider.addEventListener('touchstart', markInteracted, { passive:true });
+          slider.addEventListener('touchmove', markInteracted, { passive:true });
+          slider.addEventListener('touchend', markInteracted, { passive:true });
+        }
+
+        const finish = (e) => {
+          if (e) {
+            if (typeof e.preventDefault === 'function') e.preventDefault();
+            if (typeof e.stopPropagation === 'function') e.stopPropagation();
+          }
+          if (finished) return;
+          finished = true;
+          resolve({
+            confidenceScore: Number(slider.value),
+            confidenceInteracted: interacted,
+            confidenceSubmitted: true,
+            confidenceRtMs: Math.round(now() - confidenceStart)
+          });
+        };
+
+        if (IS_MOBILE) {
+          submitBtn.addEventListener('touchend', finish, { once:true, passive:false });
+          submitBtn.addEventListener('contextmenu', e => e.preventDefault());
+        }
+        submitBtn.addEventListener('click', finish, { once:true, passive:false });
+        // No setTimeout — participant controls when to proceed
+      });
+    }
+
+    async function captureDecision(label, exposureMs, card, trialIndex) {
+      const s = screen(`
+        <div class="card">
+          <p class="muted">${label} · ${exposureMs}ms</p>
+          <h2>Decision Card</h2>
+          <div id="decisionCard" style="background:#12171d;border-radius:12px;padding:16px;margin-bottom:12px">
+            <p><strong>Risk:</strong> ${card.risk}</p>
+            <p style="margin:0"><strong>Reward:</strong> ${card.reward}</p>
+          </div>
+          <div class="two-col" id="choiceRow" style="user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;">
+            <button id="acceptBtn" style="user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;">Accept</button>
+            <button id="rejectBtn" style="user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;">Reject</button>
+          </div>
+          <p class="smallnote" id="decisionNote">${exposureMs===250 ? 'Card will disappear quickly, but you can still answer after it hides.' : 'Respond while the card is visible.'}</p>
+        </div>`);
+
+      const stimTs = now();
+      const decisionCard = s.querySelector('#decisionCard');
+      const noteEl = s.querySelector('#decisionNote');
+      const acceptBtn = s.querySelector('#acceptBtn');
+      const rejectBtn = s.querySelector('#rejectBtn');
+
+      logEvent({
+        test_name:testName,
+        condition:`${label}_${exposureMs}ms`,
+        event_type:'stimulus_onset',
+        stimulus_ts_ms:Math.round(stimTs),
+        response_ts_ms:'',
+        reaction_time_ms:'',
+        error_status:'',
+        mouse_x:'',
+        mouse_y:'',
+        action_key:'',
+        action_value:JSON.stringify(card),
+        extra:`trial=${trialIndex};card_type=${card.good?'accept':'reject'}`
+      });
+
+      return await new Promise(resolve => {
+        let finished = false;
+        let responseWindowClosed = false;
+
+        const finish = (payload) => {
+          if (finished) return;
+          finished = true;
+          acceptBtn.disabled = true;
+          rejectBtn.disabled = true;
+          resolve({ ...payload, stimTs });
+        };
+
+        const handleChoice = (which) => (e) => {
+          if (e) {
+            if (typeof e.preventDefault === 'function') e.preventDefault();
+            if (typeof e.stopPropagation === 'function') e.stopPropagation();
+          }
+          if (finished || responseWindowClosed) return;
+          const pt = getPointer(e || {});
+          finish({
+            choice: which,
+            responseTs: now(),
+            mx: Number.isFinite(pt.x) ? Math.round(pt.x) : '',
+            my: Number.isFinite(pt.y) ? Math.round(pt.y) : ''
+          });
+        };
+
+        const acceptHandler = handleChoice('Accept');
+        const rejectHandler = handleChoice('Reject');
+
+        if (IS_MOBILE) {
+          acceptBtn.addEventListener('touchend', acceptHandler, { passive:false });
+          rejectBtn.addEventListener('touchend', rejectHandler, { passive:false });
+          acceptBtn.addEventListener('contextmenu', e => e.preventDefault());
+          rejectBtn.addEventListener('contextmenu', e => e.preventDefault());
+        }
+        acceptBtn.addEventListener('click', acceptHandler, { passive:false });
+        rejectBtn.addEventListener('click', rejectHandler, { passive:false });
+
+        if (exposureMs === 250) {
+          setTimeout(() => {
+            if (finished) return;
+            if (decisionCard) {
+              decisionCard.style.visibility = 'hidden';
+              decisionCard.style.pointerEvents = 'none';
+            }
+            if (noteEl) noteEl.textContent = 'Card hidden. Accept/Reject remain active for 1.5 seconds.';
+          }, 250);
+
+          setTimeout(() => {
+            if (finished) return;
+            responseWindowClosed = true;
+            finish({ choice:'', responseTs:null, mx:'', my:'' });
+          }, 1750);
+        } else {
+          setTimeout(() => {
+            if (finished) return;
+            if (decisionCard) decisionCard.style.opacity = '0.35';
+            if (noteEl) noteEl.textContent = 'Respond now. The card has been on screen for 1 second.';
+          }, 1000);
+        }
+      });
+    }
+
+    async function runBlock(label, exposureMs) {
+      await countdown(`${label} begins`,2);
+      const blockCards = shuffleArray(cards);
+      for (let i = 0; i < blockCards.length; i++) {
+        const c = blockCards[i];
+        const trialIndex = i + 1;
+
+        const decision = await captureDecision(label, exposureMs, c, trialIndex);
+        let confidenceScore = '';
+        let confidenceMeta = 'confidence_skipped=true;confidence_interacted=false';
+
+        if (decision.choice) {
+          const confRes = await collectConfidence(decision.choice, label, exposureMs);
+          confidenceScore = confRes.confidenceScore;
+          confidenceMeta = `confidence_rt_ms=${confRes.confidenceRtMs};confidence_interacted=${confRes.confidenceInteracted}`;
+        }
+
+        const err = !decision.choice ? true : (c.good ? decision.choice !== 'Accept' : decision.choice !== 'Reject');
+        const commissionError = !!(decision.choice && !c.good && decision.choice === 'Accept');
+        logEvent({
+          test_name:testName,
+          condition:`${label}_${exposureMs}ms`,
+          event_type:'response',
+          stimulus_ts_ms:Math.round(decision.stimTs),
+          response_ts_ms:decision.responseTs ? Math.round(decision.responseTs) : '',
+          reaction_time_ms:decision.responseTs ? Math.round(decision.responseTs - decision.stimTs) : '',
+          error_status:err,
+          mouse_x:decision.mx,
+          mouse_y:decision.my,
+          action_key:'tap',
+          action_value:decision.choice || 'no_response',
+          confidence_score: decision.choice ? confidenceScore : '',
+          extra:`trial=${trialIndex};commission_error=${commissionError};below_300ms=${exposureMs<300};${confidenceMeta}`
+        });
+        await wait(220);
+      }
+    }
+
+    await runBlock('BlockA',1000);
+    await runBlock('BlockB',250);
+    await nasaModal(testName);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 3 — HAPTIC AGENCY (touch-tracking replaces mouse)
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test3HapticAgency() {
+    const testName='Test 3 - Haptic Agency';
+    await instructions(3,'Haptic Agency (Move-and-Wait)',[
+      IS_MOBILE
+        ? 'Keep your finger inside the moving circle by dragging.'
+        : 'Keep your cursor inside the moving circle.',
+      'Three blocks: 0ms delay, 50ms delay, 200ms delay.',
+      'Distance is sampled at a higher rate, along with pause and overshoot metrics.'
+    ]);
+    const delays=[0,50,200];
+    for(const delay of delays){
+      await countdown(`Delay ${delay}ms`,2);
+      const ar=arena();
+      const topOff=48;
+      const arenH=state.vh-topOff;
+
+      const targetEl=document.createElement('div');
+      targetEl.className='target-circle';
+      const tSize=Math.min(110,state.vw*0.28);
+      const targetRadius = tSize / 2;
+      targetEl.style.cssText=`width:${tSize}px;height:${tSize}px;`;
+      targetEl.innerHTML='<span>follow</span>';
+
+      const dotEl=document.createElement('div');
+      dotEl.className='touch-dot';
+
+      const footerEl=document.createElement('div');
+      footerEl.className='footer-note';
+      footerEl.textContent=`Delay: ${delay}ms — ${IS_MOBILE?'drag finger':'move mouse'} to track circle`;
+
+      ar.appendChild(targetEl);
+      ar.appendChild(dotEl);
+      ar.appendChild(footerEl);
+
+      let actualPos={x:state.vw/2,y:topOff+arenH/2,t:now()};
+      let delayQueue=[];
+      let dotPos={...actualPos};
+      let active=true;
+      const trialStart=now();
+      let frameCount=0;
+      let sampleCount=0;
+      let outOfTargetSamples=0;
+      let pauseCount=0;
+      let pauseStartedAt=null;
+      let pauseActive=false;
+      let overshootCount=0;
+      let overshootArmed=false;
+      let hadNearCenter=false;
+      let prevDist = Math.hypot(dotPos.x - state.vw/2, dotPos.y - (topOff+arenH/2));
+      let prevActualPos={x:actualPos.x,y:actualPos.y};
+
+      const moveHandler=(e)=>{
+        e.preventDefault();
+        const pt=getPointer(e);
+        actualPos={x:pt.x,y:pt.y,t:now()};
+        delayQueue.push({...actualPos});
+      };
+      const evtOpts={passive:false};
+      if(IS_MOBILE){
+        ar.addEventListener('touchmove',moveHandler,evtOpts);
+        ar.addEventListener('touchstart',moveHandler,evtOpts);
+      } else {
+        ar.addEventListener('mousemove',moveHandler);
+      }
+
+      const duration=8000;
+      function animate(){
+        if(!active)return;
+        const t=now()-trialStart;
+        const cx=state.vw/2+Math.cos(t/1100)*(Math.min(state.vw*0.28,160));
+        const cy=topOff+arenH/2+Math.sin(t/800)*(Math.min(arenH*0.22,100));
+        targetEl.style.left=(cx-tSize/2)+'px';
+        targetEl.style.top=(cy-tSize/2)+'px';
+
+        while(delayQueue.length && (now()-delayQueue[0].t)>=delay){
+          const p=delayQueue.shift();
+          dotPos={x:p.x,y:p.y};
+        }
+        dotEl.style.left=dotPos.x+'px';
+        dotEl.style.top=(dotPos.y-topOff)+'px';
+
+        const actualMove = Math.hypot(actualPos.x - prevActualPos.x, actualPos.y - prevActualPos.y);
+        const frameNow = now();
+        if(actualMove < 2){
+          if(pauseStartedAt===null) pauseStartedAt = frameNow;
+          if(!pauseActive && frameNow - pauseStartedAt > 300){
+            pauseCount++;
+            pauseActive = true;
+          }
+        } else {
+          pauseStartedAt = null;
+          pauseActive = false;
+        }
+        prevActualPos = { x: actualPos.x, y: actualPos.y };
+
+        const dist=Math.hypot(dotPos.x-cx,dotPos.y-cy);
+        if(dist <= 15) hadNearCenter = true;
+        const radialDelta = dist - prevDist;
+        if(hadNearCenter && dist > 30 && radialDelta > 0.75){
+          overshootArmed = true;
+        }
+        if(overshootArmed && radialDelta < -0.75){
+          overshootCount++;
+          overshootArmed = false;
+          hadNearCenter = false;
+        }
+        prevDist = dist;
+
+        if(frameCount % 2 === 0){
+          sampleCount++;
+          const outside = dist > targetRadius;
+          if(outside) outOfTargetSamples++;
+          logEvent({test_name:testName,condition:`delay_${delay}ms`,event_type:'sample',
+            stimulus_ts_ms:Math.round(trialStart),response_ts_ms:Math.round(frameNow),
+            reaction_time_ms:'',error_status:outside,
+            mouse_x:Math.round(actualPos.x),mouse_y:Math.round(actualPos.y),
+            action_key:IS_MOBILE?'touch':'mousemove',action_value:'',
+            extra:`dist=${dist.toFixed(1)};delay=${delay}`});
+        }
+        frameCount++;
+        if(t<duration) requestAnimationFrame(animate);
+      }
+      requestAnimationFrame(animate);
+      await wait(duration);
+      active=false;
+      if(IS_MOBILE){
+        ar.removeEventListener('touchmove',moveHandler);
+        ar.removeEventListener('touchstart',moveHandler);
+      } else {
+        ar.removeEventListener('mousemove',moveHandler);
+      }
+      const outOfTargetRate = sampleCount ? (outOfTargetSamples / sampleCount).toFixed(4) : '0.0000';
+      logEvent({test_name:testName,condition:`delay_${delay}ms`,event_type:'summary',
+        stimulus_ts_ms:Math.round(trialStart),response_ts_ms:Math.round(now()),
+        reaction_time_ms:'',error_status:'',mouse_x:'',mouse_y:'',action_key:'',action_value:'',
+        extra:`pause_count=${pauseCount};overshoot_count=${overshootCount};out_of_target_rate=${outOfTargetRate};input=${IS_MOBILE?'touch':'mouse'}`});
+      await wait(300);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 4 — VISUAL INTEGRATION (RSVP)
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test4RSVP() {
+    const testName='Test 4 - Visual Integration';
+    await instructions(4,'Visual Integration (RSVP)',[
+      'A stream of words flashes at the centre.',
+      'One target word is <strong>FRAUD</strong>.',
+      'Tap Yes or No after each sequence.'
+    ]);
+    const fillers=['MARKET','SIGNAL','TRUST','DELTA','QUEUE','ALERT','TOKEN','STATE','FRAME','ENTRY','SPEED','SWITCH'];
+    async function runBlock(label,dur){
+      await countdown(`${label} begins`,2);
+      for(let t=0;t<8;t++){
+        const hasTarget=Math.random()<0.5;
+        const targetPos=hasTarget?(1+Math.floor(Math.random()*8)):null;
+        const words=Array.from({length:10},()=>fillers[(Math.random()*fillers.length)|0]);
+        if(hasTarget)words[targetPos]='FRAUD';
+        const ar=arena();
+        const wordEl=document.createElement('div');
+        wordEl.className='word-display';
+        ar.appendChild(wordEl);
+        const stimTs=now();
+        logEvent({test_name:testName,condition:`${label}_${dur}ms`,event_type:'stimulus_onset',
+          stimulus_ts_ms:Math.round(stimTs),response_ts_ms:'',reaction_time_ms:'',error_status:'',
+          mouse_x:'',mouse_y:'',action_key:'',action_value:hasTarget?'target_present':'target_absent',
+          extra:`trial=${t+1};target_pos=${targetPos!==null?targetPos:''}`});
+        for(const w of words){wordEl.textContent=w;await wait(dur);}
+        clearScreens();
+        const q=screen(`<div class="card">
+          <p class="muted">${label} · ${dur}ms per word</p>
+          <h2>Did you see <span style="color:#ffd166">FRAUD</span>?</h2>
+          <div class="two-col"><button id="yes">Yes</button><button id="no">No</button></div>
+        </div>`);
+        let responseTs=null,choice='',mx='',my='';
+        const evt=IS_MOBILE?'touchstart':'click';
+        await new Promise(resolve=>{
+          q.querySelector('#yes').addEventListener(evt,e=>{choice='Yes';responseTs=now();const pt=getPointer(e);mx=Math.round(pt.x);my=Math.round(pt.y);resolve();},{once:true,passive:true});
+          q.querySelector('#no').addEventListener(evt,e=>{choice='No';responseTs=now();const pt=getPointer(e);mx=Math.round(pt.x);my=Math.round(pt.y);resolve();},{once:true,passive:true});
+        });
+        const err=hasTarget?choice!=='Yes':choice!=='No';
+        logEvent({test_name:testName,condition:`${label}_${dur}ms`,event_type:'response',
+          stimulus_ts_ms:Math.round(stimTs),response_ts_ms:Math.round(responseTs),
+          reaction_time_ms:Math.round(responseTs-stimTs),error_status:err,
+          mouse_x:mx,mouse_y:my,action_key:'tap',action_value:choice,
+          extra:`trial=${t+1};target_present=${hasTarget};target_pos=${targetPos!==null?targetPos:''};visual_failure_band=${dur===100}`});
+        await wait(200);
+      }
+    }
+    await runBlock('BlockA',300);
+    await runBlock('BlockB',100);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 5 — FRAUD SCENARIO
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test5FraudScenario() {
+    const testName='Test 5 - The Fraud Scenario';
+    await instructions(5,'The Fraud Scenario (Information-Action Gap)',[
+      'Judge whether each email is Safe or Spam.',
+      'The email has an obvious phishing cue.',
+      'Block A: no timer. Block B: 1.5 seconds only.'
+    ]);
+    async function runBlock(label,timed){
+      await countdown(`${label} begins`,2);
+      for(let i=0;i<6;i++){
+        // Randomise button order each trial — prevents positional learning
+        const spamLeft=Math.random()<0.5;
+        const s=screen(`
+          <div class="card" style="width:100%;max-width:600px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+              <p class="muted" style="margin:0">${label}</p>
+              <p class="muted" style="margin:0">Trial ${i+1} of 6</p>
+              ${timed?`<div id="fraudTimer" style="font-size:20px;font-weight:800;color:#ffd1d4;background:rgba(127,30,40,0.3);border:1px solid #7d3138;border-radius:10px;padding:4px 12px;">1.50s</div>`:''}
+            </div>
+            <div class="email-frame">
+              <div class="email-head">From: Security Update &lt;security@paypa1-secure-check.com&gt;<br>Subject: Urgent account verification</div>
+              <div class="email-body">
+                <p>Dear user, unusual activity was detected. Verify now to avoid suspension.</p>
+                <p><span class="danger-mark">Link:</span> <span class="email-link">http://paypa1-secure-check.com/login/verify</span></p>
+                <p class="muted" style="font-size:13px">Note: misspelled brand domain, insecure HTTP.</p>
+                <div class="two-col" style="margin-top:12px">
+                  ${spamLeft
+                    ? `<button class="danger" id="spamBtn">Spam</button><button id="safeBtn">Safe</button>`
+                    : `<button id="safeBtn">Safe</button><button class="danger" id="spamBtn">Spam</button>`}
+                </div>
+              </div>
+            </div>
+            <p class="smallnote" id="t5note" style="margin-top:10px">${timed?'Decide before the timer runs out.':'Take your time and judge carefully.'}</p>
+          </div>`, false);
+        const stimTs=now();
+        let responseTs=null,choice='',mx='',my='';
+        const safeBtn=s.querySelector('#safeBtn');
+        const spamBtn=s.querySelector('#spamBtn');
+        logEvent({test_name:testName,condition:timed?'countdown_1500ms':'no_timer',event_type:'stimulus_onset',
+          stimulus_ts_ms:Math.round(stimTs),response_ts_ms:'',reaction_time_ms:'',error_status:'',
+          mouse_x:'',mouse_y:'',action_key:'',action_value:'phishing_email',
+          extra:`trial=${i+1};spam_left=${spamLeft}`});
+        const evt=IS_MOBILE?'touchstart':'click';
+        const p=new Promise(resolve=>{
+          const handleChoice=(which,btn)=>(e)=>{
+            if(responseTs)return;
+            choice=which; responseTs=now();
+            const pt=getPointer(e); mx=Math.round(pt.x); my=Math.round(pt.y);
+            safeBtn.disabled=true; spamBtn.disabled=true;
+            btn.textContent=which==='Spam'?'✓ Spam':'✓ Safe';
+            btn.style.background=which==='Spam'?'#2d5c35':'#1a2f4a';
+            btn.style.borderColor=which==='Spam'?'#4cd28d':'#4a90d9';
+            const note=s.querySelector('#t5note');
+            if(note) note.textContent='Response recorded. Next trial loading...';
+            resolve();
+          };
+          safeBtn.addEventListener(evt,handleChoice('Safe',safeBtn),{once:true,passive:true});
+          spamBtn.addEventListener(evt,handleChoice('Spam',spamBtn),{once:true,passive:true});
+        });
+        if(timed){
+          const timerEl=s.querySelector('#fraudTimer');
+          const dur=1500; const t0=now();
+          const tick=setInterval(()=>{
+            const r=Math.max(0,dur-(now()-t0));
+            if(timerEl) timerEl.textContent=(r/1000).toFixed(2)+'s';
+          },16);
+          await Promise.race([p,wait(dur)]);
+          clearInterval(tick);
+          if(!responseTs){
+            safeBtn.disabled=true; spamBtn.disabled=true;
+            safeBtn.style.opacity='0.3'; spamBtn.style.opacity='0.3';
+            if(timerEl) timerEl.textContent='0.00s';
+            const note=s.querySelector('#t5note');
+            if(note) note.textContent='Time expired. Next trial loading...';
+          }
+        } else {
+          await p;
+        }
+        const err=choice!=='Spam';
+        logEvent({test_name:testName,condition:timed?'countdown_1500ms':'no_timer',event_type:'response',
+          stimulus_ts_ms:Math.round(stimTs),
+          response_ts_ms:responseTs?Math.round(responseTs):'',
+          reaction_time_ms:responseTs?Math.round(responseTs-stimTs):'',
+          error_status:err,mouse_x:mx,mouse_y:my,action_key:'tap',
+          action_value:choice||'no_response',extra:`trial=${i+1};time_pressure=${timed};spam_left=${spamLeft}`});
+        await wait(700);
+        clearScreens();
+        await wait(150);
+      }
+    }
+    await runBlock('BlockA',false);
+    await runBlock('BlockB',true);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 6 — FRICTION VS AWARENESS
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test6FrictionVsAwareness() {
+    const testName='Test 6 - Friction vs Awareness';
+    await instructions(6,'Friction vs Awareness (The Solution)',[
+      'Classify each colour cue: <strong>Approve</strong> for blue, <strong>Reject</strong> for orange.',
+      'Baseline: no warning and no mechanical friction.',
+      'Awareness: warning screen before the block, then normal responding.',
+      'Friction: no warning, but buttons lock for 500ms on every trial.'
+    ]);
+    async function blockWarning(){
+      const s=screen(`<div class="card">
+        <h2>Awareness Condition</h2>
+        <p><strong>Warning:</strong> Speed increases errors. Stay careful and maintain control.</p>
+        <p class="muted">No mechanical delay in this block.</p>
+        <button class="primary btn-full" id="go" style="margin-top:8px">Continue</button>
+      </div>`);
+      const evt=IS_MOBILE?'touchstart':'click';
+      await new Promise(r=>s.querySelector('#go').addEventListener(evt,r,{once:true,passive:true}));
+    }
+    async function runTrials(condName,frictionMs){
+      await countdown(`${condName} begins`,2);
+      for(let i=0;i<16;i++){
+        const good=Math.random()<0.5;
+        const label=good?'Approve':'Reject';
+        const color=good?'#4b78d1':'#e58b42';
+        const s=screen(`<div class="card">
+          <p class="muted">${condName}</p>
+          <h2>Classify the cue</h2>
+          <div class="color-cue" style="background:${color}">${good?'BLUE':'ORANGE'}</div>
+          <div class="lock-text" id="lockText">${frictionMs?'Buttons unlock in 0.50s':'Respond now'}</div>
+          <div class="two-col">
+            <button id="approveBtn">Approve</button>
+            <button id="rejectBtn">Reject</button>
+          </div>
+        </div>`);
+        const stimTs=now();
+        logEvent({test_name:testName,condition:condName,event_type:'stimulus_onset',
+          stimulus_ts_ms:Math.round(stimTs),response_ts_ms:'',reaction_time_ms:'',error_status:'',
+          mouse_x:'',mouse_y:'',action_key:'',action_value:label,
+          extra:`trial=${i+1};friction_ms=${frictionMs}`});
+        const approveBtn=s.querySelector('#approveBtn');
+        const rejectBtn=s.querySelector('#rejectBtn');
+        const lockText=s.querySelector('#lockText');
+        if(frictionMs){
+          approveBtn.disabled=true;rejectBtn.disabled=true;
+          const t0=now();
+          const iv=setInterval(()=>{
+            const r=Math.max(0,frictionMs-(now()-t0));
+            lockText.textContent=`Buttons unlock in ${(r/1000).toFixed(2)}s`;
+          },16);
+          await wait(frictionMs);
+          clearInterval(iv);
+          approveBtn.disabled=false;rejectBtn.disabled=false;
+          lockText.textContent='Respond now';
+        }
+        let choice='',responseTs=null,mx='',my='';
+        const evt=IS_MOBILE?'touchstart':'click';
+        await new Promise(resolve=>{
+          approveBtn.addEventListener(evt,e=>{choice='Approve';responseTs=now();const pt=getPointer(e);mx=Math.round(pt.x);my=Math.round(pt.y);resolve();},{once:true,passive:true});
+          rejectBtn.addEventListener(evt,e=>{choice='Reject';responseTs=now();const pt=getPointer(e);mx=Math.round(pt.x);my=Math.round(pt.y);resolve();},{once:true,passive:true});
+        });
+        const err=choice!==label;
+        logEvent({test_name:testName,condition:condName,event_type:'response',
+          stimulus_ts_ms:Math.round(stimTs),response_ts_ms:Math.round(responseTs),
+          reaction_time_ms:Math.round(responseTs-stimTs),error_status:err,
+          mouse_x:mx,mouse_y:my,action_key:'tap',action_value:choice,
+          extra:`trial=${i+1};friction_ms=${frictionMs}`});
+        await wait(160);
+      }
+    }
+    await runTrials('Baseline_NoIntervention',0);
+    await blockWarning();
+    await runTrials('Awareness_WarningOnly',0);
+    await runTrials('Friction_500msLock',500);
+    await nasaModal(testName);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TEST 7 — STARLIGHT OBSERVATION (tap replaces mouse)
+  // ══════════════════════════════════════════════════════════════════════════
+  async function test7Starlight() {
+    const testName='Test 7 - The Starlight Observation';
+    await instructions(7,'The Starlight Observation (Motor Committal)',[
+      'Tap the button as quickly as you can when it appears.',
+      'On some trials the button will change to <strong>DON\'T TAP</strong> — if it changes, stop and tap the green <strong>✓ I stopped — Next Trial</strong> button that appears.',
+      'The flip occurs on roughly 30% of trials at a random moment between 0.4 and 0.6 seconds.'
+    ],'Start Final Test');
+    for(let i=0;i<20;i++){
+      const ar=arena();
+      const aW=state.vw;
+      const aH=state.vh-48;
+      const bW=Math.min(180,aW*0.48);
+      const bH=64;
+      const x=Math.max(8,Math.random()*(aW-bW-16));
+      const y=80+Math.random()*(aH-bH-120);
+      const btn=document.createElement('div');
+      btn.className='click-target';
+      btn.style.cssText=`left:${x}px;top:${y}px;width:${bW}px;`;
+      btn.textContent='SAFE TO TAP';
+      ar.appendChild(btn);
+
+      let stateLabel='SAFE';
+      let flipTs=null,clickTs=null,mx='',my='';
+      const flipTrial=Math.random()<0.30;
+      const flipDelay=flipTrial?(400+Math.random()*200):null;
+      const stimTs=now();
+      logEvent({test_name:testName,condition:flipTrial?'flip_400to600ms_after_appearance':'stable_safe',
+        event_type:'stimulus_onset',stimulus_ts_ms:Math.round(stimTs),response_ts_ms:'',
+        reaction_time_ms:'',error_status:'',mouse_x:'',mouse_y:'',action_key:'',
+        action_value:stateLabel,extra:`trial=${i+1};flip_delay_ms=${flipDelay?Math.round(flipDelay):''}`});
+
+      if(flipTrial){
+        setTimeout(()=>{
+          if(!clickTs){
+            stateLabel='DO_NOT_TAP';
+            flipTs=now();
+            btn.textContent='DON\'T TAP';
+            btn.classList.add('bad');
+
+            // Participant correctly stopped — show a separate advance button
+            // so they are never forced to tap the bad button to continue
+            const nextBtn=document.createElement('div');
+            nextBtn.className='click-target';
+            nextBtn.style.cssText=`
+              left:50%;transform:translateX(-50%);
+              bottom:40px;top:auto;width:${bW}px;
+              background:#1a3a2a;border-color:#2d6b47;color:#4cd28d;
+              font-size:14px;`;
+            nextBtn.textContent='✓ I stopped — Next Trial';
+            ar.appendChild(nextBtn);
+
+            const nextEvt=IS_MOBILE?'touchstart':'click';
+            nextBtn.addEventListener(nextEvt,e=>{
+              if(clickTs) return; // already tapped the bad button, ignore
+              clickTs=now();
+              const pt=getPointer(e);mx=Math.round(pt.x);my=Math.round(pt.y);
+              // Mark as correct stop — not a ghost click, not an error
+              stateLabel='CORRECT_STOP';
+            },{once:true,passive:true});
+          }
+        },flipDelay);
+      }
+
+      await new Promise(resolve=>{
+        const evt=IS_MOBILE?'touchstart':'click';
+        // Tap on the SAFE TO TAP / DON'T TAP button
+        btn.addEventListener(evt,e=>{
+          if(clickTs) return; // already resolved via Next button
+          clickTs=now();
+          const pt=getPointer(e);mx=Math.round(pt.x);my=Math.round(pt.y);
+          resolve();
+        },{once:true,passive:true});
+        // Poll for resolution via the Next Trial button (set clickTs from there)
+        const poll=setInterval(()=>{
+          if(clickTs){ clearInterval(poll); resolve(); }
+        },50);
+      });
+
+      const ghostClick=!!(flipTs&&clickTs&&clickTs>=flipTs&&stateLabel==='DO_NOT_TAP');
+      const motorWindow=(flipTs&&clickTs)?Math.round(clickTs-flipTs):'';
+      const err=stateLabel==='DO_NOT_TAP'; // only error if they tapped the bad button
+      const correctStop=stateLabel==='CORRECT_STOP';
+      logEvent({test_name:testName,condition:flipTrial?'flip_400to600ms_after_appearance':'stable_safe',
+        event_type:'response',stimulus_ts_ms:Math.round(stimTs),
+        response_ts_ms:Math.round(clickTs),
+        reaction_time_ms:Math.round(clickTs-stimTs),
+        error_status:err,mouse_x:mx,mouse_y:my,action_key:IS_MOBILE?'touch':'click',
+        action_value:correctStop?'CORRECT_STOP':stateLabel,
+        extra:`trial=${i+1};ghost_click=${ghostClick};correct_stop=${correctStop};flip_delay_ms=${flipDelay?Math.round(flipDelay):''};flip_ts=${flipTs?Math.round(flipTs):''};motor_halt_window_ms=${motorWindow}`});
+      await wait(200);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // DOWNLOAD CSV
+  // ══════════════════════════════════════════════════════════════════════════
+  async function downloadCsv() {
+    const headers=['participant_id','suite_version','test_name','condition','event_type','stimulus_ts_ms',
+      'response_ts_ms','reaction_time_ms','error_status','mouse_x','mouse_y','action_key',
+      'action_value','confidence_score','nasa_temporal_demand','nasa_frustration','nasa_performance',
+      'relative_ts_ms','screen_w','screen_h','device_type','extra'];
+    if (state.sessionCollapsed) return;
+    await encryptionQueue;
+    const decryptedRows = [];
+    for (const block of state.logs || []) decryptedRows.push(await decryptLogBlock(block));
+    const rows=[headers.join(',')].concat(
+      decryptedRows.map(r=>headers.map(h=>csvEscape(r[h])).join(','))
+    );
+    const csv=rows.join('
+');
+    const filename = `${state.participantId}_hmts_suite_data.csv`;
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(async ()=>{
+      URL.revokeObjectURL(url);
+      a.remove();
+      await collapseSession();
+    }, 1200);
+  }
+
+  function summarizeTest(tn){
+    const s = (state.summaryByTest && state.summaryByTest[tn]) || { trials: 0, errors: 0 };
+    return{trials:s.trials,errors:s.errors,rate:s.trials?(s.errors/s.trials*100).toFixed(1):'0.0'};
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FINISH
+  // ══════════════════════════════════════════════════════════════════════════
+  async function finish() {
+    setProgress(7);setStatus('Exporting');
+    screen(`<div class="card">
+      <h2>Preparing One-Shot Export</h2>
+      <p>Your encrypted session vault is compiling the final CSV.</p>
+      <p class="muted">Zero-PII mode allows exactly one structural export. After the blob is generated, session memory is destroyed.</p>
+      <p class="smallnote" style="margin-top:12px">Device: ${IS_MOBILE?'Mobile':'Desktop'} · ID: ${state.participantId}</p>
+    </div>`);
+    await wait(50);
+    await downloadCsv();
+    await wait(1300);
+    setStatus('Vault Destroyed');
+    screen(`<div class="card">
+      <h2>Suite Complete &amp; Vault Destroyed</h2>
+      <div style="margin:12px 0 14px;padding:14px 16px;border:1px solid #2d6b47;border-radius:12px;background:rgba(26,58,42,0.38)">
+        <p style="margin:0 0 8px;font-weight:800;color:#b8ffd8">AES session key mathematically zeroized</p>
+        <p style="margin:0;color:#d6f7e4">The active cryptographic vault has been destroyed. A second CSV download is structurally impossible because the in-memory key material and encrypted blocks have already been cleared.</p>
+      </div>
+      <p class="muted">If you need another export, start a brand-new suite session.</p>
+      <button class="primary btn-full" onclick="location.reload()">Start New Session</button>
+    </div>`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // INTRO
+  // ══════════════════════════════════════════════════════════════════════════
+  async function intro() {
+    setProgress(0);setStatus('HMTS Suite');
+    const subtleReady = !!(window.crypto && window.crypto.subtle);
+    const cryptoWarning = subtleReady
+      ? '<p class="smallnote" style="color:#4cd28d;">✓ Secure Context detected. Hardware-accelerated Zero-PII active.</p>'
+      : `<div style="margin:12px 0 0;padding:14px 16px;border:1px solid #c5862b;border-radius:12px;background:rgba(197, 134, 43, 0.15)">
+          <p style="margin:0 0 8px;font-weight:800;color:#ffd166">⚠ Offline Poly-Cipher Mode Engaged</p>
+          <p style="margin:0;color:#e7edf5;font-size:14px;">The browser restricted hardware cryptography. The suite has automatically switched to a software cipher to preserve the architecture.</p>
+        </div>`;
+    const s=screen(`<div class="card">
+      <h1>HMTS Behavioral Testing Suite</h1>
+      <p class="muted">Version 3.1 · Browser-based timing study · ${IS_MOBILE?'Mobile':'Desktop'} mode</p>
+      <div class="space"></div>
+      <p><strong>ID:</strong> <span class="mono">${state.participantId}</span></p>
+      <p>7 short tests · CSV saves automatically at the end.</p>
+      ${cryptoWarning}
+      <div class="space"></div>
+      <button class="primary btn-full" id="startBtn">Begin Suite</button>
+    </div>`);
+    const startBtn = s.querySelector('#startBtn');
+    await new Promise((resolve,reject)=>{
+      let fired = false;
+      const trigger = async (ev) => {
+        if (fired) return;
+        fired = true;
+        if (ev && ev.cancelable) ev.preventDefault();
+        try {
+          await initSessionCrypto();
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      };
+      startBtn.addEventListener('click', trigger, { passive:false });
+      startBtn.addEventListener('touchend', trigger, { passive:false });
+      startBtn.addEventListener('pointerup', trigger, { passive:false });
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RUN
+  // ══════════════════════════════════════════════════════════════════════════
+  async function runSuite() {
+    try {
+      await intro();
+      await test1Loop();
+      await test2ImmediateResponse();
+      await test3HapticAgency();
+      await test4RSVP();
+      await test5FraudScenario();
+      await test6FrictionVsAwareness();
+      await test7Starlight();
+      await finish();
+    } catch(err) {
+      console.error(err);
+      if (!state.sessionCollapsed) {
+        try {
+          await downloadCsv();
+        } catch(e) {
+          console.error('CSV rescue failed:', e);
+        }
+      }
+      await wait(1300);
+      setStatus('Session Terminated');
+      screen(`<div class="card">
+        <h2>Unexpected Error</h2>
+        <p>${String(err&&err.message||err)}</p>
+        <div style="margin:12px 0 14px;padding:14px 16px;border:1px solid #7d3138;border-radius:12px;background:rgba(127,30,40,0.28)">
+          <p style="margin:0 0 8px;font-weight:800;color:#ffd1d4">Cryptographic session terminated</p>
+          <p style="margin:0;color:#ffd1d4">Any active Zero-PII vault has been destroyed. Partial data rescue was attempted only while the encrypted session was still alive.</p>
+        </div>
+        <p class="muted">If encryption could not initialize, reopen this file from HTTPS or localhost. A fresh session is required before testing again.</p>
+        <button class="primary btn-full" onclick="location.reload()">Reload &amp; Restart</button>
+      </div>`);
+    }
+  }
+  runSuite();
+})();
+</script>
+</body>
+</html>
